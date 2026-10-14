@@ -1,52 +1,61 @@
 
-from pyspark.sql import SparkSession
+from pyspark.sql import functions as F
 
-from utils import read_csv, write_delta
+# Paths
+BASE_PATH = "/Volumes/dev_catalog/bronze/stream_data/assignment_q1"
 
-
-# Initialize Spark session
-spark = SparkSession.builder.appName(
-    "Employee_Source_To_Bronze"
-).getOrCreate()
-
-
-# Source CSV file paths
 SOURCE_PATH = "/Volumes/dev_catalog/bronze/stream_data"
 
-employee_path = f"{SOURCE_PATH}/Employee-Q1.csv"
-department_path = f"{SOURCE_PATH}/Department-Q1.csv"
-country_path = f"{SOURCE_PATH}/Country-Q1.csv"
+BRONZE_PATH = f"{BASE_PATH}/source_to_bronze"
 
+# Read Employee CSV
+employee_df = (
+    spark.read
+    .option("header", True)
+    .option("inferSchema", True)
+    .csv(f"{SOURCE_PATH}/Employee-Q1.csv")
+)
 
-# Bronze output paths
-BRONZE_PATH = "/Volumes/dev_catalog/bronze/assignment_q1"
+# Read Department CSV
+department_df = (
+    spark.read
+    .option("header", True)
+    .option("inferSchema", True)
+    .csv(f"{SOURCE_PATH}/Department-Q1.csv")
+)
 
-employee_bronze_path = f"{BRONZE_PATH}/employee"
-department_bronze_path = f"{BRONZE_PATH}/department"
-country_bronze_path = f"{BRONZE_PATH}/country"
+# Read Country CSV
+country_df = (
+    spark.read
+    .option("header", True)
+    .option("inferSchema", True)
+    .csv(f"{SOURCE_PATH}/Country-Q1.csv")
+)
 
+# Display source data
+print("Employee count:", employee_df.count())
+display(employee_df)
 
-# Read source CSV files
-employee_df = read_csv(spark, employee_path)
-department_df = read_csv(spark, department_path)
-country_df = read_csv(spark, country_path)
+print("Department count:", department_df.count())
+display(department_df)
 
+print("Country count:", country_df.count())
+display(country_df)
 
-# Display source data for validation
-print("Employee source data")
-employee_df.show(5, truncate=False)
+# Write source DataFrames to Bronze as CSV directories
+employee_df.write \
+    .mode("overwrite") \
+    .option("header", True) \
+    .csv(f"{BRONZE_PATH}/employee_df")
 
-print("Department source data")
-department_df.show(5, truncate=False)
+department_df.write \
+    .mode("overwrite") \
+    .option("header", True) \
+    .csv(f"{BRONZE_PATH}/department_df")
 
-print("Country source data")
-country_df.show(5, truncate=False)
+country_df.write \
+    .mode("overwrite") \
+    .option("header", True) \
+    .csv(f"{BRONZE_PATH}/country_df")
 
-
-# Write data to Bronze layer
-write_delta(employee_df, employee_bronze_path)
-write_delta(department_df, department_bronze_path)
-write_delta(country_df, country_bronze_path)
-
-
-print("All three CSV files loaded into Bronze successfully.")
+print("Source-to-Bronze ingestion completed successfully.")
