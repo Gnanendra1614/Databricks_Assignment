@@ -1,75 +1,103 @@
 
-from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
-
-spark = SparkSession.builder.appName(
-    "Employee_Bronze_To_Silver"
-).getOrCreate()
-
-# Bronze input location
-BRONZE_PATH = "/Volumes/dev_catalog/bronze/stream_data/assignment_q1"
-
-# Read Bronze Delta data
-employee_df = spark.read.format("delta").load(
-    f"{BRONZE_PATH}/employee"
+from pyspark.sql.types import (
+    StructType, StructField,
+    StringType, LongType, IntegerType
 )
 
-department_df = spark.read.format("delta").load(
-    f"{BRONZE_PATH}/department"
+from utils import (
+    read_csv,
+    convert_columns_to_snake_case,
+    add_load_date,
+    write_delta
 )
 
-country_df = spark.read.format("delta").load(
-    f"{BRONZE_PATH}/country"
+# Paths
+BASE_PATH = "/Volumes/dev_catalog/bronze/stream_data/assignment_q1"
+BRONZE_PATH = f"{BASE_PATH}/source_to_bronze"
+SILVER_PATH = f"{BASE_PATH}/silver/Employee_info/dim_employee"
+
+# Custom schemas
+employee_schema = StructType([
+    StructField("EmployeeID", LongType(), True),
+    StructField("EmployeeName", StringType(), True),
+    StructField("Department", StringType(), True),
+    StructField("Country", StringType(), True),
+    StructField("Salary", LongType(), True),
+    StructField("Age", IntegerType(), True)
+])
+
+department_schema = StructType([
+    StructField("DepartmentID", StringType(), True),
+    StructField("DepartmentName", StringType(), True)
+])
+
+country_schema = StructType([
+    StructField("CountryCode", StringType(), True),
+    StructField("CountryName", StringType(), True)
+])
+
+# Read Bronze CSV datasets
+employee_df = read_csv(
+    f"{BRONZE_PATH}/employee_df",
+    employee_schema
 )
 
-# Clean employee data
-employee_clean = (
-    employee_df
-    .dropDuplicates(["EmployeeID"])
-    .filter(F.col("EmployeeID").isNotNull())
-    .filter(F.col("EmployeeName").isNotNull())
-    .withColumn("EmployeeName", F.trim(F.col("EmployeeName")))
-    .filter(F.col("EmployeeName") != "")
+department_df = read_csv(
+    f"{BRONZE_PATH}/department_df",
+    department_schema
 )
 
-# Clean department and country lookup data
-department_clean = (
-    department_df
-    .drop("_source_file", "_ingested_at")
-    .dropDuplicates(["DepartmentID"])
+country_df = read_csv(
+    f"{BRONZE_PATH}/country_df",
+    country_schema
 )
 
-country_clean = (
-    country_df
-    .drop("_source_file", "_ingested_at")
-    .dropDuplicates(["CountryCode"])
-)
+# Convert column names to snake_case using the utility UDF
+employee_df = convert_columns_to_snake_case(employee_df)
+department_df = convert_columns_to_snake_case(department_df)
+country_df = convert_columns_to_snake_case(country_df)
 
-# Join Employee with Department and Country
+# Join employee data with department and country lookup data
 silver_df = (
-    employee_clean
+    employee_df
     .join(
-        department_clean,
-        employee_clean["Department"] == department_clean["DepartmentID"],
+        department_df,
+        employee_df.department == department_df.department_id,
         "left"
     )
     .join(
-        country_clean,
-        employee_clean["Country"] == country_clean["CountryCode"],
+        country_df,
+        employee_df.country == country_df.country_code,
         "left"
     )
-    .drop("DepartmentID", "CountryCode")
+    .select(
+        employee_df.employee_id,
+        employee_df.employee_name,
+        employee_df.department.alias("department_id"),
+        department_df.department_name,
+        employee_df.country.alias("country_code"),
+        country_df.country_name,
+        employee_df.salary,
+        employee_df.age
+    )
 )
 
-# Write Silver Delta data
-SILVER_PATH = f"{BRONZE_PATH}/silver/employee"
+# Add load date
+silver_df = add_load_date(silver_df, "load_date")
 
-(
-    silver_df.write
-    .format("delta")
-    .mode("overwrite")
-    .save(SILVER_PATH)
+# Check primary-key uniqueness
+duplicate_ids = (
+    silver_df.groupBy("employee_id")
+    .count()
+    .filter(F.col("count") > 1)
 )
 
-print("Bronze to Silver transformation completed!")
+print("Silver row count:", silver_df.count())
+print("Duplicate employee IDs:", duplicate_ids.count())
 display(silver_df)
+
+# Write cleaned data as Delta
+write_delta(silver_df, SILVER_PATH)
+
+print("Bronze-to-Silver transformation completed successfully.")
